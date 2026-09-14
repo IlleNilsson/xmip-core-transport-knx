@@ -348,23 +348,18 @@ impl Loopback for KnxTransport {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use transport::payload::edge_payloads;
 
     /// The shapes a protocol breaks on, as the Playground lists them.
-    fn edge_payloads() -> Vec<(&'static str, Vec<u8>)> {
-        vec![
-            ("empty", Vec::new()),
-            ("one byte", vec![0x2a]),
-            ("every byte", (0..=255).collect()),
-            ("nul run", vec![0; 512]),
-            ("high bytes", vec![0xff; 512]),
-            ("crlf storm", b"\r\n".repeat(400)),
-            (
-                "sixty-four kibibytes plus one",
-                (0..65_537u32)
-                    .map(|n| u8::try_from(n * 31 % 256).unwrap_or(0))
-                    .collect(),
-            ),
-        ]
+    fn payloads() -> Vec<(&'static str, Vec<u8>)> {
+        let mut payloads = edge_payloads();
+        payloads.extend([(
+            "sixty-four kibibytes plus one",
+            (0..65_537u32)
+                .map(|n| u8::try_from(n * 31 % 256).unwrap_or(0))
+                .collect(),
+        )]);
+        payloads
     }
 
     #[test]
@@ -394,7 +389,7 @@ mod tests {
     #[test]
     fn the_loopback_returns_the_edges_whole() {
         let loopback = KnxTransport::loopback();
-        for (name, bytes) in edge_payloads() {
+        for (name, bytes) in payloads() {
             let arrived = loopback
                 .round(&bytes)
                 .unwrap_or_else(|error| panic!("{name}: {error}"));
