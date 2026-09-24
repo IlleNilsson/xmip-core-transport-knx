@@ -26,6 +26,7 @@ use std::net::UdpSocket;
 use std::time::Duration;
 
 pub use cemi::{GroupAddress, IndividualAddress, Telegram};
+use transport::bound::{Bound, Reading};
 use transport::error::{Result, TransportError, classify, protocol_error};
 use transport::loopback::{FarEnd, LOOPBACK_TIMEOUT, Loopback};
 use transport::{Arrived, Directions, Transport};
@@ -303,33 +304,17 @@ impl KnxTransport {
     }
 }
 
-/// The interface's end of the tunnel, bound and waiting for its one client.
-struct Interface {
-    transport: KnxTransport,
-    socket: UdpSocket,
-    address: String,
-}
-
-impl FarEnd for Interface {
-    fn address(&self) -> &str {
-        &self.address
-    }
-
-    fn take_one(self: Box<Self>) -> Result<Arrived> {
-        self.transport
-            .serve(&self.socket)?
+impl Reading for KnxTransport {
+    /// The interface's end of the tunnel, bound and waiting for its one client.
+    fn take_one(self, socket: &UdpSocket) -> Result<Arrived> {
+        self.serve(socket)?
             .ok_or_else(|| protocol_error("no client connected"))
     }
 }
 
 impl Loopback for KnxTransport {
     fn far_end(&self) -> Result<Box<dyn FarEnd>> {
-        let (socket, address) = self.bind()?;
-        Ok(Box::new(Interface {
-            transport: self.clone(),
-            socket,
-            address,
-        }))
+        Ok(Box::new(Bound::new(self.clone(), self.bind()?)))
     }
 
     fn send_to(&self, address: &str, payload: &[u8]) -> Result<()> {
