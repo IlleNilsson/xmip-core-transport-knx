@@ -323,11 +323,6 @@ impl Loopback for KnxTransport {
             .timing_out_after(self.timeout)
             .send("", payload)
     }
-
-    fn unblock(&self, _address: &str) {
-        // The server's receive has its own timeout; there is no listener to
-        // poke.
-    }
 }
 
 #[cfg(test)]
