@@ -20,6 +20,7 @@
 //! and the group: `knx://127.0.0.1:49152/1/2/3`.
 
 pub mod cemi;
+pub mod settings;
 pub mod tunnelling;
 
 use std::net::UdpSocket;
