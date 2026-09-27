@@ -29,6 +29,7 @@ use std::time::Duration;
 pub use cemi::{GroupAddress, IndividualAddress, Telegram};
 use transport::bound::{Bound, Reading};
 use transport::error::{Result, TransportError, classify, protocol_error};
+use transport::kept::Kept;
 use transport::loopback::{FarEnd, LOOPBACK_TIMEOUT, Loopback};
 use transport::{Arrived, Directions, Transport};
 use tunnelling::Service;
@@ -51,6 +52,9 @@ pub struct KnxTransport {
     source: IndividualAddress,
     group: GroupAddress,
     timeout: Duration,
+    /// The interface's socket the first receive binds, and every receive
+    /// serves a tunnel on.
+    receiving: Kept<UdpSocket>,
 }
 
 impl KnxTransport {
@@ -64,6 +68,7 @@ impl KnxTransport {
             source: IndividualAddress::new(1, 1, 10),
             group: GroupAddress::new(1, 2, 3),
             timeout: Duration::from_secs(1),
+            receiving: Kept::new(),
         }
     }
 
@@ -271,10 +276,12 @@ impl Transport for KnxTransport {
         Directions::BOTH
     }
 
-    /// No client connecting is not an error: an empty vector.
+    /// No client connecting is not an error: an empty vector. Served on the
+    /// socket the first receive bound and kept, so a client's connect sent
+    /// between two receives waits in its buffer.
     fn receive(&self) -> Result<Vec<Arrived>> {
-        let (socket, _) = self.bind()?;
-        Ok(self.serve(&socket)?.into_iter().collect())
+        let socket = self.receiving.bound(|| self.bind())?;
+        Ok(self.serve(socket)?.into_iter().collect())
     }
 
     /// `target` may name the interface and the group, `knx://host:3671/1/2/3`,
@@ -341,6 +348,16 @@ mod tests {
                 .collect(),
         )]);
         payloads
+    }
+
+    #[test]
+    fn every_receive_serves_on_the_socket_the_first_bound() {
+        let receiver = KnxTransport::loopback();
+        receiver.receiving.bound(|| receiver.bind()).expect("bound");
+        let address = receiver.receiving.address().expect("address");
+        transport::kept::held_across_receives(&receiver, address, 5, |at, payload| {
+            KnxTransport::loopback().send_to(at, payload)
+        });
     }
 
     #[test]
