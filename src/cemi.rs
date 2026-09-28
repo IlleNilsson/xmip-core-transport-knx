@@ -11,15 +11,14 @@ use transport::error::{Result, protocol_error};
 /// A data request from the client to the bus.
 pub const L_DATA_REQ: u8 = 0x11;
 /// A data indication from the bus to the client.
-pub const L_DATA_IND: u8 = 0x29;
-/// The bus's confirmation of a request.
-pub const L_DATA_CON: u8 = 0x2e;
+#[cfg(test)]
+const L_DATA_IND: u8 = 0x29;
 
 /// The most data an extended frame's length byte can say, less the APCI
 /// byte it also counts.
 pub const MAX_DATA: usize = 254;
 /// The most data a standard frame carries.
-pub const MAX_STANDARD_DATA: usize = 14;
+const MAX_STANDARD_DATA: usize = 14;
 
 /// Control field 1 of an extended frame: not repeated, system broadcast,
 /// low priority.
