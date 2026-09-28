@@ -9,7 +9,7 @@ use crate::{GroupAddress, KnxTransport};
 
 /// Any local address, a port the operating system chooses: where a client
 /// binds unless told otherwise.
-pub const ANY_LOCAL: &str = "0.0.0.0:0";
+const ANY_LOCAL: &str = "0.0.0.0:0";
 
 impl Configured for KnxTransport {
     /// The address is the interface: where a Receive Location serves the

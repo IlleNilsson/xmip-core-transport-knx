@@ -26,8 +26,6 @@ const CRI: [u8; 4] = [0x04, 0x04, 0x02, 0x00];
 
 /// No error.
 pub const OK: u8 = 0x00;
-/// The interface has no channel left.
-pub const NO_MORE_CONNECTIONS: u8 = 0x24;
 
 /// One frame of the tunnelling protocol.
 #[derive(Clone, Debug, PartialEq, Eq)]

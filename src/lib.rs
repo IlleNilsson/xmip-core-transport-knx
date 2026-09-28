@@ -27,6 +27,7 @@ use std::net::UdpSocket;
 use std::time::Duration;
 
 pub use cemi::{GroupAddress, IndividualAddress, Telegram};
+use net::Target;
 use transport::bound::{Bound, Reading};
 use transport::error::{Result, TransportError, classify, protocol_error};
 use transport::kept::Kept;
@@ -287,7 +288,7 @@ impl Transport for KnxTransport {
     /// `target` may name the interface and the group, `knx://host:3671/1/2/3`,
     /// overriding the transport's.
     fn send(&self, target: &str, bytes: &[u8]) -> Result<()> {
-        match transport::socket::target("knx", target) {
+        match Target::under(&["knx"], target).map(|named| (named.authority(), named.path())) {
             Some((interface, group)) if !interface.is_empty() => {
                 let group = if group.is_empty() {
                     self.group
