@@ -14,12 +14,26 @@
 //! address through an interface; a Receive Location is the interface's end
 //! of a tunnel, taking what a client writes.
 //!
-//! The far end is in-process: [`KnxTransport::receive`] serves one tunnel
-//! on a UDP socket the way an interface would, and the loopback pair is a
-//! client and that server on this machine. The origin URI names the client
-//! and the group: `knx://127.0.0.1:49152/1/2/3`.
+//! The far end is in-process: [`KnxTransport::receive`] serves a tunnel
+//! on a UDP socket the way an interface would ([`interface`]), and the
+//! loopback pair is a client and that server on this machine. The origin
+//! URI names the client and the group: `knx://127.0.0.1:49152/1/2/3`.
+//!
+//! **The client is acknowledged after the whole receive cycle.** It waits
+//! for the tunnelling acknowledgement of the telegram that ends its Stream:
+//! status `OK` on [`transport::Verdict::Accepted`],
+//! [`interface::DATA_CONNECTION_ERROR`] on [`transport::Verdict::Failed`],
+//! which fails its write as retryable so it sends the Stream again.
+//! KNXnet/IP has no status that refuses a telegram for good — every error
+//! status of KNX Standard 3.8.2's tunnelling acknowledgement concerns the
+//! connection, and a client repeats or reconnects — so on
+//! [`transport::Verdict::Refused`] the telegram is acknowledged `OK`: the
+//! Stream is taken and not sent again, and the refusal is what the runtime
+//! audited. The telegrams before it
+//! are acknowledged as they come. Each Stream arrives whole.
 
 pub mod cemi;
+pub mod interface;
 pub mod settings;
 pub mod tunnelling;
 
@@ -27,12 +41,13 @@ use std::net::UdpSocket;
 use std::time::Duration;
 
 pub use cemi::{GroupAddress, IndividualAddress, Telegram};
+pub use interface::Interface;
 use net::Target;
 use transport::bound::{Bound, Reading};
 use transport::error::{Result, TransportError, classify, protocol_error};
 use transport::kept::Kept;
 use transport::loopback::{FarEnd, LOOPBACK_TIMEOUT, Loopback};
-use transport::{Arrived, Directions, Transport};
+use transport::{Arrived, Directions, Taken, Transport};
 use tunnelling::Service;
 
 /// The telegram carries the Stream's first bytes.
@@ -56,6 +71,8 @@ pub struct KnxTransport {
     /// The interface's socket the first receive binds, and every receive
     /// serves a tunnel on.
     receiving: Kept<UdpSocket>,
+    /// The tunnel open on it, kept between receives.
+    tunnel: Interface,
 }
 
 impl KnxTransport {
@@ -70,6 +87,7 @@ impl KnxTransport {
             group: GroupAddress::new(1, 2, 3),
             timeout: Duration::from_secs(1),
             receiving: Kept::new(),
+            tunnel: Interface::default(),
         }
     }
 
@@ -128,8 +146,9 @@ impl KnxTransport {
                     status: tunnelling::OK,
                 }) if (c, s) == (channel, sequence) => return Ok(()),
                 Ok(Service::TunnellingAck { status, .. }) => {
-                    return Err(protocol_error(format!(
-                        "the interface refused the telegram with status {status:#04x}"
+                    return Err(TransportError::retryable(format!(
+                        "the interface refused the telegram with status {status:#04x}: \
+                         send it again"
                     )));
                 }
                 Ok(_) => return Err(protocol_error("not the acknowledgement that was due")),
@@ -146,8 +165,9 @@ impl KnxTransport {
     /// chunk, on one tunnelling connection.
     ///
     /// # Errors
-    /// An interface that does not answer, refuses the connection, or does
-    /// not acknowledge a telegram after a repeat.
+    /// An interface that does not answer, refuses the connection, refuses a
+    /// telegram (retryable: it did not take it), or does not acknowledge a
+    /// telegram after a repeat.
     pub fn write(&self, group: GroupAddress, bytes: &[u8]) -> Result<()> {
         let (socket, _) = self.bind()?;
         let to = &self.interface;
@@ -173,74 +193,25 @@ impl KnxTransport {
             };
             Self::acknowledged(&socket, to, &request)?;
         }
-        match Self::exchange(&socket, to, &Service::DisconnectRequest { channel })? {
-            Service::DisconnectResponse { .. } => Ok(()),
-            _ => Err(protocol_error("not a disconnect response")),
+        // Every telegram is acknowledged: the Stream is the interface's. A
+        // disconnect it does not answer in time is no failure of the send.
+        match Self::exchange(&socket, to, &Service::DisconnectRequest { channel }) {
+            Ok(Service::DisconnectResponse { .. }) => Ok(()),
+            Err(error) if error.retryable => Ok(()),
+            Ok(_) => Err(protocol_error("not a disconnect response")),
+            Err(error) => Err(error),
         }
     }
 
-    /// Serve one tunnel on `socket` as an interface would: answer the
-    /// connect, acknowledge each telegram, and hand over the Stream when the
-    /// client disconnects. `None` when no client connected in time.
+    /// Serve the tunnel on `socket` as an interface would, until a Stream
+    /// has arrived, whole: its last telegram is acknowledged by the
+    /// arrival's verdict ([`Interface::serve`]). `None` when nothing came in
+    /// time.
     ///
     /// # Errors
     /// Where the socket could not be read or the client broke the protocol.
     pub fn serve(&self, socket: &UdpSocket) -> Result<Option<Arrived>> {
-        let (first, peer) = match Self::next(socket) {
-            Ok(next) => next,
-            Err(error) if error.retryable => return Ok(None),
-            Err(error) => return Err(error),
-        };
-        let Service::ConnectRequest = first else {
-            return Err(protocol_error("a frame before the connect request"));
-        };
-        let answer = |service: &Service| {
-            socket
-                .send_to(&service.encode(), &peer)
-                .map(drop)
-                .map_err(|e| classify("answering the client", &e))
-        };
-        let channel = 1;
-        answer(&Service::ConnectResponse {
-            channel,
-            status: tunnelling::OK,
-            address: self.source.0,
-        })?;
-        let mut arriving = Vec::new();
-        let mut group = self.group;
-        loop {
-            let (service, _) = Self::next(socket)?;
-            match service {
-                Service::TunnellingRequest { sequence, cemi, .. } => {
-                    answer(&Service::TunnellingAck {
-                        channel,
-                        sequence,
-                        status: tunnelling::OK,
-                    })?;
-                    let (_, telegram) = Telegram::decode(&cemi)?;
-                    group = telegram.destination;
-                    let (flags, chunk) = telegram
-                        .data
-                        .split_first()
-                        .ok_or_else(|| protocol_error("a telegram without its flags"))?;
-                    if flags & FIRST != 0 {
-                        arriving.clear();
-                    }
-                    arriving.extend_from_slice(chunk);
-                }
-                Service::DisconnectRequest { .. } => {
-                    answer(&Service::DisconnectResponse {
-                        channel,
-                        status: tunnelling::OK,
-                    })?;
-                    return Ok(Some(Arrived::new(
-                        format!("knx://{peer}/{group}"),
-                        arriving,
-                    )));
-                }
-                _ => return Err(protocol_error("a frame the tunnel was not expecting")),
-            }
-        }
+        self.tunnel.serve(socket, self.source, self.group)
     }
 }
 
@@ -277,9 +248,16 @@ impl Transport for KnxTransport {
         Directions::BOTH
     }
 
+    fn arrivals(&self) -> transport::Arrivals {
+        transport::Arrivals::Ordered("the tunnel's telegrams are acknowledged by sequence counter")
+    }
+
     /// No client connecting is not an error: an empty vector. Served on the
     /// socket the first receive bound and kept, so a client's connect sent
-    /// between two receives waits in its buffer.
+    /// between two receives waits in its buffer. The client waits for the
+    /// acknowledgement of its Stream's last telegram until the receive
+    /// cycle has ended: `OK` on accepted and on refused (taken, not sent
+    /// again), [`interface::DATA_CONNECTION_ERROR`] on failed.
     fn receive(&self) -> Result<Vec<Arrived>> {
         let socket = self.receiving.bound(|| self.bind())?;
         Ok(self.serve(socket)?.into_iter().collect())
@@ -315,9 +293,13 @@ impl KnxTransport {
 
 impl Reading for KnxTransport {
     /// The interface's end of the tunnel, bound and waiting for its one client.
-    fn take_one(self, socket: &UdpSocket) -> Result<Arrived> {
-        self.serve(socket)?
-            .ok_or_else(|| protocol_error("no client connected"))
+    fn take_one(self, socket: &UdpSocket) -> Result<Taken> {
+        let taken = self
+            .serve(socket)?
+            .ok_or_else(|| protocol_error("no client connected"))?
+            .taken()?;
+        self.tunnel.closed(socket)?;
+        Ok(taken)
     }
 }
 
@@ -404,6 +386,9 @@ mod tests {
         let target = format!("knx://{address}/5/6/7");
         let sending = std::thread::spawn(move || client.send(&target, b"on"));
         let arrived = server.serve(&socket).expect("serving").expect("a client");
+        assert!(arrived.defers(), "the client waits for its acknowledgement");
+        let arrived = arrived.taken().expect("acknowledged");
+        server.tunnel.closed(&socket).expect("disconnected");
         sending.join().expect("thread").expect("sending");
         assert_eq!(arrived.bytes, b"on");
         assert!(
@@ -420,6 +405,40 @@ mod tests {
             server.receive().expect("nobody").is_empty(),
             "nobody is not an error"
         );
+    }
+
+    #[test]
+    fn a_failed_stream_fails_the_write_retryable_and_a_refused_one_is_taken() {
+        let receiver = KnxTransport::loopback();
+        let address = receiver
+            .receiving
+            .bound(|| receiver.bind())
+            .map(|_| receiver.receiving.address().unwrap_or_default().to_string())
+            .expect("bound");
+        let sender = std::thread::spawn(move || {
+            let client =
+                KnxTransport::new("127.0.0.1:0", &address).timing_out_after(LOOPBACK_TIMEOUT);
+            // Refused: acknowledged, so the write succeeds and is not repeated.
+            client.send("", &[7; 40])?;
+            let failed = client.send("", &[9; 40]).expect_err("failed");
+            client.send("", &[9; 40])?;
+            Ok::<_, TransportError>(failed)
+        });
+        let refused = receiver.receive().expect("refused").remove(0);
+        assert!(refused.defers());
+        refused
+            .refused(transport::Refusal::Unacceptable)
+            .expect("acknowledged");
+        // The first tunnel's disconnect is answered by the receive that
+        // follows, which then takes the second tunnel's Stream.
+        let failed = receiver.receive().expect("the second").remove(0);
+        failed.failed().expect("failed");
+        let again = receiver.receive().expect("again").remove(0);
+        assert_eq!(again.taken().expect("acknowledged").bytes, [9; 40]);
+        // The disconnect is answered by the receive that follows.
+        assert!(receiver.receive().expect("disconnected").is_empty());
+        let failed = sender.join().expect("thread").expect("sent again");
+        assert!(failed.retryable, "{failed}");
     }
 
     #[test]
