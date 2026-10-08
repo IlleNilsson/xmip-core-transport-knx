@@ -4,7 +4,7 @@
 //! has ended. The tunnel stays open between receives, so the client's
 //! disconnect, or its next Stream, is taken by the next.
 
-use std::net::UdpSocket;
+use std::net::{SocketAddr, UdpSocket};
 use std::sync::{Mutex, PoisonError};
 
 use transport::answer::Datagram;
@@ -26,7 +26,7 @@ const CHANNEL: u8 = 1;
 
 /// The tunnel a client holds open: who it is, and the Stream arriving.
 struct Tunnel {
-    peer: String,
+    peer: SocketAddr,
     group: GroupAddress,
     arriving: Vec<u8>,
     /// The sequence of the telegram last taken: a repeat of it is the
@@ -75,11 +75,11 @@ impl Interface {
                 Err(error) if error.retryable => return Ok(None),
                 Err(error) => return Err(error),
             };
-            let reply = |service: &Service| answer(socket, &peer, service);
+            let reply = |service: &Service| answer(socket, peer, service);
             match service {
                 Service::ConnectRequest => {
                     *open = Some(Tunnel {
-                        peer: peer.clone(),
+                        peer,
                         group,
                         arriving: Vec::new(),
                         last: None,
@@ -114,7 +114,7 @@ impl Interface {
                     }
                     let origin = format!("knx://{}/{}", tunnel.peer, tunnel.group);
                     let bytes = std::mem::take(&mut tunnel.arriving);
-                    let answering = Datagram::to(socket, tunnel.peer.clone())?;
+                    let answering = Datagram::to(socket, tunnel.peer)?;
                     let verdict = Acknowledgement::deferred(move |verdict| {
                         let status = match verdict {
                             // No status refuses a telegram for good: a
@@ -124,7 +124,8 @@ impl Interface {
                         };
                         answering.send(&acknowledgement(sequence, status).encode())
                     });
-                    return Ok(Some(Arrived::whole(origin, bytes, verdict)));
+                    let from = tunnel.peer;
+                    return Ok(Some(Arrived::whole(origin, bytes, verdict).from_peer(from)));
                 }
                 Service::DisconnectRequest { .. } => {
                     *open = None;
@@ -151,7 +152,7 @@ impl Interface {
         *self.tunnel.lock().unwrap_or_else(PoisonError::into_inner) = None;
         answer(
             socket,
-            &peer,
+            peer,
             &Service::DisconnectResponse {
                 channel: CHANNEL,
                 status: tunnelling::OK,
@@ -168,7 +169,7 @@ const fn acknowledgement(sequence: u8, status: u8) -> Service {
     }
 }
 
-fn answer(socket: &UdpSocket, peer: &str, service: &Service) -> Result<()> {
+fn answer(socket: &UdpSocket, peer: SocketAddr, service: &Service) -> Result<()> {
     socket
         .send_to(&service.encode(), peer)
         .map(drop)

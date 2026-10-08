@@ -37,12 +37,13 @@ pub mod interface;
 pub mod settings;
 pub mod tunnelling;
 
-use std::net::UdpSocket;
+use std::net::{SocketAddr, UdpSocket};
 use std::time::Duration;
 
 pub use cemi::{GroupAddress, IndividualAddress, Telegram};
 pub use interface::Interface;
 use net::Target;
+use transport::ArrivalIdentity;
 use transport::bound::{Bound, Reading};
 use transport::error::{Result, TransportError, classify, protocol_error};
 use transport::kept::Kept;
@@ -114,12 +115,12 @@ impl KnxTransport {
         transport::socket::bind_udp(&self.bind, Some(self.timeout))
     }
 
-    fn next(socket: &UdpSocket) -> Result<(Service, String)> {
+    fn next(socket: &UdpSocket) -> Result<(Service, SocketAddr)> {
         let mut buffer = vec![0u8; MAX_FRAME];
         let (read, peer) = socket
             .recv_from(&mut buffer)
             .map_err(|e| classify("waiting for a tunnelling frame", &e))?;
-        Ok((Service::decode(&buffer[..read])?, peer.to_string()))
+        Ok((Service::decode(&buffer[..read])?, peer))
     }
 
     fn exchange(socket: &UdpSocket, to: &str, service: &Service) -> Result<Service> {
@@ -304,6 +305,10 @@ impl Reading for KnxTransport {
 }
 
 impl Loopback for KnxTransport {
+    fn arrival_identity(&self) -> ArrivalIdentity {
+        ArrivalIdentity::PEER
+    }
+
     fn far_end(&self) -> Result<Box<dyn FarEnd>> {
         Ok(Box::new(Bound::new(self.clone(), self.bind()?)))
     }
