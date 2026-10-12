@@ -253,6 +253,10 @@ impl Transport for KnxTransport {
         transport::Arrivals::Ordered("the tunnel's telegrams are acknowledged by sequence counter")
     }
 
+    fn waiting(&self) -> transport::Waiting {
+        transport::Waiting::Waits("a read of the socket waits for a tunnelling frame")
+    }
+
     /// No client connecting is not an error: an empty vector. Served on the
     /// socket the first receive bound and kept, so a client's connect sent
     /// between two receives waits in its buffer. The client waits for the
