@@ -263,14 +263,19 @@ impl Transport for KnxTransport {
     /// acknowledgement of its Stream's last telegram until the receive
     /// cycle has ended: `OK` on accepted and on refused (taken, not sent
     /// again), [`interface::DATA_CONNECTION_ERROR`] on failed.
-    fn receive(&self) -> Result<Vec<Arrived>> {
+    fn receive_up_to(&self, _most: usize) -> Result<Vec<Arrived>> {
         let socket = self.receiving.bound(|| self.bind())?;
         Ok(self.serve(socket)?.into_iter().collect())
     }
 
+    fn sending(&self) -> transport::Sending {
+        transport::Sending::Gathered("one KNXnet/IP datagram carries the whole body")
+    }
+
     /// `target` may name the interface and the group, `knx://host:3671/1/2/3`,
     /// overriding the transport's.
-    fn send(&self, target: &str, bytes: &[u8]) -> Result<()> {
+    fn send_from(&self, target: &str, outgoing: transport::Outgoing<'_>) -> Result<()> {
+        let bytes: &[u8] = &outgoing.gather()?;
         match Target::under(&["knx"], target).map(|named| (named.authority(), named.path())) {
             Some((interface, group)) if !interface.is_empty() => {
                 let group = if group.is_empty() {
