@@ -41,6 +41,9 @@ impl Configured for KnxTransport {
         ],
     };
 
+    /// The schemes a Location's address is entered with to choose this technology.
+    const SCHEMES: &'static [&'static str] = &["knx"];
+
     fn configured(address: &str, settings: &Read) -> Result<Self> {
         let transport = match settings.optional_text("local") {
             // Only a Send Location reads one: it binds there and tunnels to
