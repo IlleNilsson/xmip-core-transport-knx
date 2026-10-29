@@ -48,7 +48,7 @@ use transport::bound::{Bound, Reading};
 use transport::error::{Result, TransportError, classify, protocol_error};
 use transport::kept::Kept;
 use transport::loopback::{FarEnd, LOOPBACK_TIMEOUT, Loopback};
-use transport::{Arrived, Directions, Taken, Transport};
+use transport::{Arrived, Configured, Directions, Taken, Transport};
 use tunnelling::Service;
 
 /// The telegram carries the Stream's first bytes.
@@ -276,7 +276,7 @@ impl Transport for KnxTransport {
     /// overriding the transport's.
     fn send_from(&self, target: &str, outgoing: transport::Outgoing<'_>) -> Result<()> {
         let bytes: &[u8] = &outgoing.gather()?;
-        match Target::under(&["knx"], target).map(|named| (named.authority(), named.path())) {
+        match Target::under(Self::SCHEMES, target).map(|named| (named.authority(), named.path())) {
             Some((interface, group)) if !interface.is_empty() => {
                 let group = if group.is_empty() {
                     self.group
