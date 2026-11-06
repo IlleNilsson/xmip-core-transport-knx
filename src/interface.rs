@@ -5,7 +5,8 @@
 //! disconnect, or its next Stream, is taken by the next.
 
 use std::net::{SocketAddr, UdpSocket};
-use std::sync::{Mutex, PoisonError};
+use std::sync::Mutex;
+use xcore::lock::Locked;
 
 use transport::answer::Datagram;
 use transport::error::{Result, classify, protocol_error};
@@ -68,7 +69,7 @@ impl Interface {
         address: IndividualAddress,
         group: GroupAddress,
     ) -> Result<Option<Arrived>> {
-        let mut open = self.tunnel.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut open = self.tunnel.locked();
         loop {
             let (service, peer) = match KnxTransport::next(socket) {
                 Ok(next) => next,
@@ -149,7 +150,7 @@ impl Interface {
         let Service::DisconnectRequest { .. } = service else {
             return Err(protocol_error("not the disconnect that was due"));
         };
-        *self.tunnel.lock().unwrap_or_else(PoisonError::into_inner) = None;
+        *self.tunnel.locked() = None;
         answer(
             socket,
             peer,
