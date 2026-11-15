@@ -60,6 +60,9 @@ pub const MAX_CHUNK: usize = cemi::MAX_DATA - 1;
 /// The most a KNXnet/IP datagram holds: the header, the connection header
 /// and an extended cEMI frame.
 const MAX_FRAME: usize = 6 + 4 + 9 + 2 + cemi::MAX_DATA;
+/// How long an acknowledgement or a connecting client is waited for unless
+/// a Location says.
+pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(1);
 
 /// One end of a tunnel: a client of an interface, or the interface's end.
 #[derive(Clone)]
@@ -86,7 +89,7 @@ impl KnxTransport {
             interface: interface.into(),
             source: IndividualAddress::new(1, 1, 10),
             group: GroupAddress::new(1, 2, 3),
-            timeout: Duration::from_secs(1),
+            timeout: DEFAULT_TIMEOUT,
             receiving: Kept::new(),
             tunnel: Interface::default(),
         }
@@ -96,14 +99,6 @@ impl KnxTransport {
     #[must_use]
     pub const fn writing_to(mut self, group: GroupAddress) -> Self {
         self.group = group;
-        self
-    }
-
-    /// Give up on an acknowledgement or a client that does not come within
-    /// `timeout` — one second, as the specification's tunnelling timeout is.
-    #[must_use]
-    pub const fn timing_out_after(mut self, timeout: Duration) -> Self {
-        self.timeout = timeout;
         self
     }
 

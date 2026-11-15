@@ -5,7 +5,7 @@ use transport::Configured;
 use transport::error::Result;
 use xcore::settings::{Applies, Fixed, Kind, Presence, Read, Setting, Settings};
 
-use crate::{GroupAddress, KnxTransport};
+use crate::{DEFAULT_TIMEOUT, GroupAddress, KnxTransport};
 
 /// Any local address, a port the operating system chooses: where a client
 /// binds unless told otherwise.
@@ -31,18 +31,20 @@ impl Configured for KnxTransport {
                 meaning: "The group address, main/middle/sub, written when the target names none.",
                 applies: Applies::Send,
             },
-            Setting {
-                name: "timeout",
-                kind: Kind::Duration,
-                presence: Presence::Optional,
-                meaning: "How long an acknowledgement or a connecting client is waited for.",
-                applies: Applies::Both,
-            },
+            transport::configured::timeout(
+                Applies::Both,
+                Some(DEFAULT_TIMEOUT),
+                "How long an acknowledgement or a connecting client is waited for.",
+            ),
         ],
     };
 
     /// The schemes a Location's address is entered with to choose this technology.
     const SCHEMES: &'static [&'static str] = &["knx"];
+
+    fn timeout_kept(&mut self) -> Option<&mut dyn transport::configured::TimeoutKept> {
+        Some(&mut self.timeout)
+    }
 
     fn configured(address: &str, settings: &Read) -> Result<Self> {
         let transport = match settings.optional_text("local") {
@@ -52,12 +54,8 @@ impl Configured for KnxTransport {
             // A Receive Location is the interface's end, bound at the address.
             None => Self::new(address, address),
         };
-        let transport = match settings.optional_text("group") {
+        Ok(match settings.optional_text("group") {
             Some(group) => transport.writing_to(GroupAddress::parse(group)?),
-            None => transport,
-        };
-        Ok(match settings.optional_duration("timeout") {
-            Some(timeout) => transport.timing_out_after(timeout),
             None => transport,
         })
     }
@@ -87,6 +85,12 @@ mod tests {
         let receiver =
             KnxTransport::open("0.0.0.0:3671", Applies::Receive, &given[1..]).expect("built");
         assert_eq!(receiver.bind, "0.0.0.0:3671");
+        // Left out, the Location waits the default it declares.
+        let unsaid = declared.read(Applies::Receive, &[]).expect("read");
+        let timeout = unsaid.optional_duration(transport::configured::TIMEOUT);
+        assert_eq!(timeout, Some(DEFAULT_TIMEOUT));
+        let unsaid = KnxTransport::open("0.0.0.0:3671", Applies::Receive, &[]).expect("built");
+        assert_eq!(unsaid.timeout, DEFAULT_TIMEOUT);
 
         let Err(refused) = KnxTransport::open("0.0.0.0:3671", Applies::Receive, &given) else {
             panic!("a Receive Location writes to no group");
