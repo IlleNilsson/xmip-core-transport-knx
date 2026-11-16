@@ -72,7 +72,7 @@ pub struct KnxTransport {
     source: IndividualAddress,
     group: GroupAddress,
     timeout: Duration,
-    /// The interface's socket the first receive binds, and every receive
+    /// The interface's socket its open binds, and every receive
     /// serves a tunnel on.
     receiving: Kept<UdpSocket>,
     /// The tunnel open on it, kept between receives.
@@ -253,13 +253,13 @@ impl Transport for KnxTransport {
     }
 
     /// No client connecting is not an error: an empty vector. Served on the
-    /// socket the first receive bound and kept, so a client's connect sent
+    /// socket its open bound and kept, so a client's connect sent
     /// between two receives waits in its buffer. The client waits for the
     /// acknowledgement of its Stream's last telegram until the receive
     /// cycle has ended: `OK` on accepted and on refused (taken, not sent
     /// again), [`interface::DATA_CONNECTION_ERROR`] on failed.
     fn receive_up_to(&self, _most: usize) -> Result<Vec<Arrived>> {
-        let socket = self.receiving.bound(|| self.bind())?;
+        let socket = self.receiving.listener()?;
         Ok(self.serve(socket)?.into_iter().collect())
     }
 
@@ -410,6 +410,7 @@ mod tests {
                 .send("knx://127.0.0.1:1/9/9/9", b"x")
                 .is_err()
         );
+        server.listening().expect("listens");
         assert!(
             server.receive().expect("nobody").is_empty(),
             "nobody is not an error"
