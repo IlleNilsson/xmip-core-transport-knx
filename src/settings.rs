@@ -59,6 +59,12 @@ impl Configured for KnxTransport {
             None => transport,
         })
     }
+
+    /// The socket every receive takes from, bound where a Receive Location
+    /// listens.
+    fn listening(&self) -> Result<Option<&str>> {
+        self.receiving.listening(|| self.bind())
+    }
 }
 
 #[cfg(test)]
