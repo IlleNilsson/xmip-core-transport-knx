@@ -31,40 +31,69 @@
 //! Stream is taken and not sent again, and the refusal is what the runtime
 //! audited. The telegrams before it
 //! are acknowledged as they come. Each Stream arrives whole.
+//!
+//! **Built with its `declaration` feature alone** the crate is
+//! [`declaration`], what a Location of it is configured with, and none of
+//! the code above, which is behind the default feature: what the surfaces'
+//! library carries (ADR-0064, amendment 2026-11-26). The address a client
+//! binds and the wait a Location takes unless it says, `ANY_LOCAL` and
+//! `DEFAULT_TIMEOUT`, are declared there with it.
 
+#[cfg(feature = "default")]
 pub mod cemi;
+#[cfg(feature = "default")]
+mod configured;
+#[cfg(feature = "declaration")]
+pub mod declaration;
+#[cfg(feature = "default")]
 pub mod interface;
-pub mod settings;
+#[cfg(feature = "default")]
 pub mod tunnelling;
 
+#[cfg(feature = "default")]
 use std::net::{SocketAddr, UdpSocket};
+#[cfg(feature = "default")]
 use std::time::Duration;
 
+#[cfg(feature = "default")]
 pub use cemi::{GroupAddress, IndividualAddress, Telegram};
+#[cfg(feature = "default")]
+use declaration::DEFAULT_TIMEOUT;
+#[cfg(feature = "default")]
 pub use interface::Interface;
+#[cfg(feature = "default")]
 use net::Target;
+#[cfg(feature = "default")]
 use transport::ArrivalIdentity;
+#[cfg(feature = "default")]
 use transport::bound::{Bound, Reading};
+#[cfg(feature = "default")]
 use transport::error::{Result, TransportError, classify, protocol_error};
+#[cfg(feature = "default")]
 use transport::kept::Kept;
+#[cfg(feature = "default")]
 use transport::loopback::{FarEnd, LOOPBACK_TIMEOUT, Loopback};
+#[cfg(feature = "default")]
 use transport::{Arrived, Configured, Directions, Taken, Transport};
+#[cfg(feature = "default")]
 use tunnelling::Service;
 
 /// The telegram carries the Stream's first bytes.
+#[cfg(feature = "default")]
 pub const FIRST: u8 = 0x40;
 /// The telegram carries the Stream's last bytes.
+#[cfg(feature = "default")]
 pub const LAST: u8 = 0x80;
 /// What one telegram carries past its flags byte.
+#[cfg(feature = "default")]
 pub const MAX_CHUNK: usize = cemi::MAX_DATA - 1;
 /// The most a KNXnet/IP datagram holds: the header, the connection header
 /// and an extended cEMI frame.
+#[cfg(feature = "default")]
 const MAX_FRAME: usize = 6 + 4 + 9 + 2 + cemi::MAX_DATA;
-/// How long an acknowledgement or a connecting client is waited for unless
-/// a Location says.
-pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(1);
 
 /// One end of a tunnel: a client of an interface, or the interface's end.
+#[cfg(feature = "default")]
 #[derive(Clone)]
 pub struct KnxTransport {
     bind: String,
@@ -79,6 +108,7 @@ pub struct KnxTransport {
     tunnel: Interface,
 }
 
+#[cfg(feature = "default")]
 impl KnxTransport {
     /// Bound at `bind`, tunnelling through the interface at `interface`,
     /// writing group `1/2/3` from individual address `1.1.10`.
@@ -213,6 +243,7 @@ impl KnxTransport {
 
 /// `bytes` as the data of the telegrams that carry it: a flags byte then up
 /// to [`MAX_CHUNK`] bytes. An empty Stream is one telegram, first and last.
+#[cfg(feature = "default")]
 #[must_use]
 pub fn chunks(bytes: &[u8]) -> Vec<Vec<u8>> {
     let pieces: Vec<&[u8]> = if bytes.is_empty() {
@@ -235,6 +266,7 @@ pub fn chunks(bytes: &[u8]) -> Vec<Vec<u8>> {
         .collect()
 }
 
+#[cfg(feature = "default")]
 impl Transport for KnxTransport {
     fn name(&self) -> &'static str {
         "knx"
@@ -287,6 +319,7 @@ impl Transport for KnxTransport {
     }
 }
 
+#[cfg(feature = "default")]
 impl KnxTransport {
     /// Both ends on this machine: an ephemeral local port each, the loopback
     /// timeout on the acknowledgements.
@@ -296,6 +329,7 @@ impl KnxTransport {
     }
 }
 
+#[cfg(feature = "default")]
 impl Reading for KnxTransport {
     /// The interface's end of the tunnel, bound and waiting for its one client.
     fn take_one(self, socket: &UdpSocket) -> Result<Taken> {
@@ -308,6 +342,7 @@ impl Reading for KnxTransport {
     }
 }
 
+#[cfg(feature = "default")]
 impl Loopback for KnxTransport {
     fn arrival_identity(&self) -> ArrivalIdentity {
         ArrivalIdentity::PEER

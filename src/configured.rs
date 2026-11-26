@@ -1,46 +1,16 @@
-//! What a KNX Location says beyond its address, declared once and read
-//! through (ADR-0064, amendment 2026-09-26).
+//! How a KNX Location is configured: `Configured`, reading what it says
+//! beyond its address, which its [`declaration`](crate::declaration)
+//! declares once (ADR-0064, amendments 2026-09-26 and 2026-11-26).
 
 use transport::Configured;
 use transport::error::Result;
-use xcore::settings::{Applies, Fixed, Kind, Presence, Read, Setting, Settings};
+use xcore::settings::{Read, Settings};
 
-use crate::{DEFAULT_TIMEOUT, GroupAddress, KnxTransport};
-
-/// Any local address, a port the operating system chooses: where a client
-/// binds unless told otherwise.
-const ANY_LOCAL: &str = "0.0.0.0:0";
+use crate::{GroupAddress, KnxTransport, declaration};
 
 impl Configured for KnxTransport {
-    /// The address is the interface: where a Receive Location serves the
-    /// tunnel as one, and the one a Send Location tunnels through.
-    const SETTINGS: &'static Settings = &Settings {
-        technology: env!("CARGO_PKG_NAME"),
-        settings: &[
-            Setting {
-                name: "local",
-                kind: Kind::Address,
-                presence: Presence::Default(Fixed::Text(ANY_LOCAL)),
-                meaning: "The local address a Send Location binds to reach the interface.",
-                applies: Applies::Send,
-            },
-            Setting {
-                name: "group",
-                kind: Kind::Text,
-                presence: Presence::Optional,
-                meaning: "The group address, main/middle/sub, written when the target names none.",
-                applies: Applies::Send,
-            },
-            transport::configured::timeout(
-                Applies::Both,
-                Some(DEFAULT_TIMEOUT),
-                "How long an acknowledgement or a connecting client is waited for.",
-            ),
-        ],
-    };
-
-    /// The schemes a Location's address is entered with to choose this technology.
-    const SCHEMES: &'static [&'static str] = &["knx"];
+    const SETTINGS: &'static Settings = declaration::SETTINGS;
+    const SCHEMES: &'static [&'static str] = declaration::SCHEMES;
 
     fn timeout_kept(&mut self) -> Option<&mut dyn transport::configured::TimeoutKept> {
         Some(&mut self.timeout)
@@ -70,8 +40,9 @@ impl Configured for KnxTransport {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::declaration::{ANY_LOCAL, DEFAULT_TIMEOUT};
     use std::time::Duration;
-    use xcore::settings::Given;
+    use xcore::settings::{Applies, Given};
 
     #[test]
     fn knx_declares_its_settings_and_reads_through_them() {
